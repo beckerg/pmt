@@ -124,6 +124,16 @@ static pmt_test_t tests[] = {
       .every = pmt_empty_every,
     },
 
+    { .name = "inc-shared",
+      .help = "increment a shared counter",
+      .every = pmt_inc_shared_every,
+    },
+
+    { .name = "inc-pcpu",
+      .help = "increment a per-cpu counter",
+      .every = pmt_inc_pcpu_every,
+    },
+
     { .name = "atomic_add_long",
       .help = "use atomic_add_long() to increment a shared counter",
       .every = pmt_atomic_add_long_every,
@@ -140,22 +150,22 @@ static pmt_test_t tests[] = {
     },
 
     { .name = "rm_rlock",
-      .help = "use a shared rm read lock to do nothing",
+      .help = "use a shared rm read lock to increment a per-cpu counter",
       .every = pmt_rm_rlock_every,
     },
 
     { .name = "rm_wlock",
-      .help = "use a shared rm write lock to increment a counter",
+      .help = "use a shared rm write lock to increment a shared counter",
       .every = pmt_rm_wlock_every,
     },
 
     { .name = "sx_slock",
-      .help = "use a shared sx shared lock to do nothing",
+      .help = "use a shared sx shared lock to per-cpu counter",
       .every = pmt_sx_slock_every,
     },
 
     { .name = "sx_xlock",
-      .help = "use a shared sx lock to increment a counter",
+      .help = "use a shared sx lock to increment a shared counter",
       .every = pmt_sx_xlock_every,
     },
 
@@ -170,7 +180,7 @@ static pmt_test_t tests[] = {
     },
 
     { .name = "rw_rlock",
-      .help = "use a shared rw read lock to increment a private counter",
+      .help = "use a shared rw read lock to increment a per-cpu counter",
       .every = pmt_rw_rlock_every,
     },
 
@@ -180,7 +190,7 @@ static pmt_test_t tests[] = {
     },
 
     { .name = "rw_rlock+atomic_add_long",
-      .help = "use a shared rw read lock to increment an atomic counter",
+      .help = "use a shared rw read lock to increment a shared atomic counter",
       .every = pmt_rw_rlock_atomic_add_every,
     },
 
@@ -326,8 +336,8 @@ pmt_run_sysctl(SYSCTL_HANDLER_ARGS)
         return ENOMEM;
     }
 
-    sbuf_printf(sb, "\n%16s %3s %12s %12s %8s %12s %8s  %s\n",
-                "vCPUMASK", "TDS", "CALLS/s",
+    sbuf_printf(sb, "\n%16s %3s %12s %12s %12s %8s %12s %8s  %s\n",
+                "vCPUMASK", "TDS", "CALLS", "CALLS/s",
                 "ns", "ns/CALL", "CYCLES", "CY/CALL", "NAME");
 
     baseline_cycles = baseline_nsecs = 0;
@@ -385,9 +395,10 @@ pmt_run_sysctl(SYSCTL_HANDLER_ARGS)
             baseline_nsecs = nsecs_avg;
         }
 
-        sbuf_printf(sb, "%016lx %3u %12lu %12lu %8lu %12lu %8lu  %s\n",
+        sbuf_printf(sb, "%016lx %3u %12lu %12lu %12lu %8lu %12lu %8lu  %s\n",
                     pmt_cpuset.__bits[0],                   // vCPUMASK
                     CPU_COUNT(&cpuset),                     // TDS
+                    iters_avg,                              // CALLS
                     (iters_avg * 1000000000ul) / nsecs_avg, // CALLS/s
                     nsecs_avg,                              // ns
                     nsecs_avg / iters_avg,                  // ns/CALL
@@ -546,8 +557,8 @@ pmt_run(pmt_test_t *ptest, void *mem, size_t memsz, int nsamples, pmt_sample_t *
     if (pmt_verbosity > 0) {
         printf("\n%s:\n", ptest->name);
 
-        printf("%4s %16s %12s %12s %8s %12s %9s\n",
-               "LOOP", "vCPUMASK", "CALLS/s",
+        printf("%4s %16s %12s %12s %12s %8s %12s %9s\n",
+               "LOOP", "vCPUMASK", "CALLS", "CALLS/s",
                "ns", "ns/CALL", "CYCLES", "CY/CALL");
     }
 
@@ -656,8 +667,9 @@ pmt_run(pmt_test_t *ptest, void *mem, size_t memsz, int nsamples, pmt_sample_t *
         }
 
         if (pmt_verbosity > 0) {
-            printf("%4d %016lx %12lu %12lu %8lu %12lu %9lu\n",
+            printf("%4d %016lx %12u %12lu %12lu %8lu %12lu %9lu\n",
                    n, pmt_cpuset.__bits[0],
+                   iters,                                   // CALLS
                    (iters * 1000000000ul) / nsecs,          // CALLS/s
                    nsecs,                                   // ns
                    nsecs / iters,                           // ns/CALL
@@ -710,6 +722,14 @@ pmt_modevent(module_t mod, int cmd, void *data)
     switch (cmd) {
     case MOD_LOAD:
         pmt_tests_reset();
+
+        printf("\n");
+        printf("%s: %8zu  sizeof mtx\n", __func__, sizeof(struct mtx));
+        printf("%s: %8zu  sizeof sx\n", __func__, sizeof(struct sx));
+        printf("%s: %8zu  sizeof rwlock\n", __func__, sizeof(struct rwlock));
+        printf("%s: %8zu  sizeof rmlock\n", __func__, sizeof(struct rmlock));
+        printf("%s: %8zu  sizeof pmt_priv_s\n", __func__, sizeof(struct pmt_priv_s));
+        printf("%s: %8zu  sizeof pmt_share_s\n", __func__, sizeof(struct pmt_share_s));
         break;
 
     case MOD_UNLOAD:

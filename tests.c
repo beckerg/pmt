@@ -40,6 +40,28 @@ pmt_empty_every(pmt_share_t *shr, pmt_priv_t *priv)
 }
 
 
+/* Increment a shared counter (no synchronization).
+ */
+int
+pmt_inc_shared_every(pmt_share_t *shr, pmt_priv_t *priv)
+{
+    ++shr->count;
+
+    return 0;
+}
+
+
+/* Increment a per-cpu counter.
+ */
+int
+pmt_inc_pcpu_every(pmt_share_t *shr, pmt_priv_t *priv)
+{
+    ++priv->count;
+
+    return 0;
+}
+
+
 /* Use a mutex to increment a shared counter.
  */
 int

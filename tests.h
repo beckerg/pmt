@@ -8,6 +8,8 @@
 #define PMT_TESTS_H
 
 extern pmt_test_cb_t pmt_empty_every;
+extern pmt_test_cb_t pmt_inc_shared_every;
+extern pmt_test_cb_t pmt_inc_pcpu_every;
 extern pmt_test_cb_t pmt_mtx_every;
 extern pmt_test_cb_t pmt_mtx_spin_every;
 extern pmt_test_cb_t pmt_sx_slock_every;

@@ -24,14 +24,14 @@ typedef struct pmt_priv_s {
     pmt_test_cb_t *every;       // Func to call on every iteration
     pmt_test_cb_t *after;       // Func to call just once after every()
 
-    unsigned long count;
+    u_long count;
 } pmt_priv_t;
 
 
 /* Data shared amongst all threads.
  */
 typedef struct pmt_share_s {
-    unsigned long count;
+    u_long count;
 
     __aligned(64)
     struct mtx    mtx;
@@ -42,6 +42,10 @@ typedef struct pmt_share_s {
     u_long        spin_count;
 
     __aligned(64)
+    struct rwlock rw;
+    u_long        rw_count;
+
+    __aligned(64)
     struct sx     sx;
     u_long        sx_count;
 
@@ -50,15 +54,11 @@ typedef struct pmt_share_s {
     u_long        rm_count;
 
     __aligned(64)
-    struct rwlock rw;
-    u_long        rw_count;
-
-    __aligned(64)
-    struct cv cv;           // Used for worker thread synchronization
-    uint64_t stop;          // Stop time in cycles or nanoseconds
-    uint64_t start;         // Start time in cycles or nanoseconds
-    uint64_t sync;          // Used to synchronize test worker threads
-    u_int nactive;          // Number of worker threads waiting to start
+    struct cv   cv;         // Used for worker thread synchronization
+    uint64_t    stop;       // Stop time in cycles or nanoseconds
+    uint64_t    start;      // Start time in cycles or nanoseconds
+    uint64_t    sync;       // Used to synchronize test worker threads
+    u_int       nactive;    // Number of worker threads waiting to start
 
     __aligned(64)
     pmt_priv_t priv[MAXCPU];// Array of per-worker thread private data
