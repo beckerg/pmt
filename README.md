@@ -37,3 +37,9 @@ As above, but run against two HT vCPUs on the same core, vCPUJS 2 and 3:
 
 1. $ sudo sysctl debug.pmt.run=0xc
 2. $ sysctl debug.pmt.results
+
+
+## Implementation
+
+For each vCPU specified by the debug.pmt.run sysctl, pmt creates a kthread,
+affines it to the vCPU, and sets its priority to PRI_MIN_KERN.
