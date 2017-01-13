@@ -20,7 +20,7 @@ as its only user interface.
 3. $ make
 4. $ sudo make load
 
-### TSC
+#### TSC
 
 By default pmt leverages the time stamp counter (i.e., rdtsc()) to measure
 time intervals.  If your machine is not P-state invariant then you need to
@@ -50,7 +50,7 @@ As above, but run against two HT vCPUs on the same core, vCPUJS 2 and 3:
 2. $ sysctl debug.pmt.results
 
 
-### Base CLK vs Turbo Mode
+#### Base CLK vs Turbo Mode
 
 Many processors have a turbo frequency at which a core can run under favorable
 environmental conditions.  If enabled, pmt is likely to produce inconsistent
@@ -78,17 +78,13 @@ For example, to lock all the processors at the base CLK frequency of 2800:
 pmt comes with a handful of tests (see pmt_tests.c), but it is fairly simple
 to add new tests.
 
-1. null The null test measures the cost of the pmt framework
-2. func The func test measure the cost of calling a function that does nothing
-3. inc-shared The inc-shared test measures the cost of directly incrementing
-a shared counter (i.e., one counter accessed by all vCPUs with no atomic
-synchronization)
-3. inc-pcpu The inc-pcpu test measures the cost of directly incrementing
-a per-cpu counter (i.e., each counter is private to the vCPU).
-4. atomic_add_long The atomic_add_long test measure the cost of directly
-adding 1 to a shared counter vi the atomic_add_long() function.
-5. mutex The mutex test measures the cost of using a shared mutext to increment
-a shared counter (i.e., the same mutex and counter are accessed by all vCPUs).
+* **null** The null test measures the cost of the pmt framework
+* **func** The func test measure the cost of calling a function that does nothing
+* **inc-shared** The inc-shared test measures the cost of directly incrementing a shared counter (i.e., one counter accessed by all vCPUs with no atomic synchronization)
+* **inc-pcpu** The inc-pcpu test measures the cost of directly incrementing a per-cpu counter (i.e., each counter is private to the vCPU).
+* **atomic_add_long** The atomic_add_long test measure the cost of directly adding 1 to a shared counter vi the atomic_add_long() function.
+* **mutex** The mutex test measures the cost of using a shared mutext to increment a shared counter (i.e., the same mutex and counter are accessed by all vCPUs).
+* TODO many others...
 
 While you can run any combination of tests, you generally want to run the **null**
 and **func** tests in that order prior to all other tests.  This is because the
