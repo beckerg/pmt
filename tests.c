@@ -30,11 +30,11 @@
 #include "tests.h"
 
 
-/* The "empty" functions are used to measure the overhead
+/* The "func" function is used to measure the overhead
  * of the test framework when calling a test callback.
  */
 int
-pmt_empty_every(pmt_share_t *shr, pmt_priv_t *priv)
+pmt_func_every(pmt_share_t *shr, pmt_priv_t *priv)
 {
     return 0;
 }

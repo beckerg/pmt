@@ -119,9 +119,9 @@ static pmt_test_t tests[] = {
       .help = "pmt framework overhead",
     },
 
-    { .name = "empty",
-      .help = "call function that does nothing",
-      .every = pmt_empty_every,
+    { .name = "func",
+      .help = "call a function that does nothing",
+      .every = pmt_func_every,
     },
 
     { .name = "inc-shared",
@@ -388,9 +388,9 @@ pmt_run_sysctl(SYSCTL_HANDLER_ARGS)
 
         /* (Re)compute the baseline.
          *
-         * TODO: Unconditionally run the "null" and "empty" tests.
+         * TODO: Unconditionally run the "null" and "func" tests.
          */
-        if (!test->every || test->every == pmt_empty_every) {
+        if (!test->every || test->every == pmt_func_every) {
             baseline_cycles = cycles_avg;
             baseline_nsecs = nsecs_avg;
         }
