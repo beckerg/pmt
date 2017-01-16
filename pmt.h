@@ -13,7 +13,7 @@ struct pmt_share_s;
 typedef int pmt_test_cb_t(struct pmt_share_s *shr, struct pmt_priv_s *priv);
 
 
-/* Per-worker thread private data
+/* Per-worker thread private data (and hence per-cpu).
  */
 typedef struct pmt_priv_s {
     struct pmt_share_s *shr;
@@ -28,7 +28,7 @@ typedef struct pmt_priv_s {
 } pmt_priv_t;
 
 
-/* Data shared amongst all threads.
+/* Data shared amongst all test worker threads.
  */
 typedef struct pmt_share_s {
     u_long count;
@@ -58,7 +58,8 @@ typedef struct pmt_share_s {
     uint64_t    stop;       // Stop time in cycles or nanoseconds
     uint64_t    start;      // Start time in cycles or nanoseconds
     uint64_t    sync;       // Used to synchronize test worker threads
-    u_int       nactive;    // Number of worker threads waiting to start
+    u_int       nwaiting;   // Number of workers waiting to start a test
+    u_int       nrunning;   // Number of worker threads running a test
 
     __aligned(64)
     pmt_priv_t priv[MAXCPU];// Array of per-worker thread private data

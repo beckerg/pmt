@@ -40,8 +40,8 @@ extern uint64_t tsc_freq;
 static unsigned int pmt_pri = PRI_MIN_KERN;
 static unsigned int pmt_verbosity = 1;
 static unsigned int pmt_samples_step = CACHE_LINE_SIZE;
-static unsigned int pmt_samples = 3;
-static unsigned int pmt_iters = 4 * 1000 * 1000;
+static unsigned int pmt_samples = 5;
+static unsigned int pmt_iters = 16 * 1000 * 1000;
 static uint64_t pmt_roundup = 2 * 1024 * 1024;
 static uint64_t pmt_align = MAP_ALIGNED_SUPER;
 static char pmt_results[2048];
@@ -66,7 +66,7 @@ typedef struct {
 
 
 static int pmt_run(pmt_test_t *ptest, void *mem, size_t memsz,
-                   int nsamples, pmt_sample_t *psamples);
+                   int samplesc, pmt_sample_t *samplesv);
 
 static int pmt_kthread_create(void (*func)(void *), void *arg, const char *name);
 
@@ -207,19 +207,28 @@ static pmt_test_t tests[] = {
     { .name = NULL }
 };
 
-static unsigned long
-pmt_cycles2nsecs(unsigned long cycles)
+/* Compute (x * 1000000000) / y, avoiding overflow even if it means
+ * loss of precision.
+ */
+static u_long
+pmt_x1b_div_y(u_long x, u_long y)
 {
-    if (((cycles << 30) >> 30) == cycles)
-        return (cycles * 1000000000ul) / tsc_freq;
+    if (((x << 30) >> 30) == x)
+        return (x * 1000000000ul) / y;
 
-    if (((cycles << 20) >> 20) == cycles)
-        return (((cycles * 1000000ul) / tsc_freq) * 1000);
+    if (((x << 20) >> 20) == x)
+        return (((x * 1000000ul) / y) * 1000);
 
-    if (((cycles << 10) >> 10) == cycles)
-        return (((cycles * 1000ul) / tsc_freq) * 1000000);
+    if (((x << 10) >> 10) == x)
+        return (((x * 1000ul) / y) * 1000000);
 
-    return ((cycles / tsc_freq) * 1000000000ul);
+    return ((x / y) * 1000000000ul);
+}
+
+static u_long
+pmt_cycles2nsecs(u_long cycles)
+{
+    return pmt_x1b_div_y(cycles, tsc_freq);
 }
 
 static void
@@ -262,9 +271,10 @@ SYSCTL_PROC(_debug_pmt, OID_AUTO, tests,
 static int
 pmt_run_sysctl(SYSCTL_HANDLER_ARGS)
 {
-    unsigned long baseline_cycles, baseline_nsecs;
+    unsigned long cycles_baseline, nsecs_baseline;
     char cpustr[CPUSETBUFSIZ];
     pmt_sample_t *samplesv;
+    size_t round, align;
     struct cpuset *set;
     struct thread *td;
     struct proc *proc;
@@ -299,7 +309,6 @@ pmt_run_sysctl(SYSCTL_HANDLER_ARGS)
     cpusetobj_strprint(pmt_cpustr, &cpuset);
     CPU_COPY(&cpuset, &pmt_cpuset);
 
-    //sb = sbuf_new(NULL, NULL, 1024 * 1024, SBUF_AUTOEXTEND | SBUF_INCLUDENUL);
     sb = sbuf_new_auto();
     if (!sb)
         return ENOMEM;
@@ -308,8 +317,8 @@ pmt_run_sysctl(SYSCTL_HANDLER_ARGS)
 
     /* Ensure roundup and align are of an integral page size.
      */
-    pmt_roundup = roundup(pmt_roundup, PAGE_SIZE);
-    pmt_align = roundup(pmt_align, PAGE_SIZE);
+    round = roundup(pmt_roundup, PAGE_SIZE);
+    align = roundup(pmt_align, PAGE_SIZE);
 
     samplesc = pmt_samples + 1;
     if (samplesc < 2)
@@ -320,9 +329,9 @@ pmt_run_sysctl(SYSCTL_HANDLER_ARGS)
     /* Determine how much memory we need to run the test.
      */
     memsz = sizeof(pmt_share_t) * samplesc * pmt_samples_step;
-    memsz = roundup(memsz, pmt_roundup);
+    memsz = roundup(memsz, round);
 
-    mem = contigmalloc(memsz, M_PMT, M_NOWAIT, 0, ~(vm_paddr_t)0, pmt_align, 0);
+    mem = contigmalloc(memsz, M_PMT, M_NOWAIT, 0, ~(vm_paddr_t)0, align, 0);
     if (!mem) {
         printf("%s: unable to malloc %lu contiguous bytes\n", __func__, memsz);
         return ENOMEM;
@@ -340,10 +349,13 @@ pmt_run_sysctl(SYSCTL_HANDLER_ARGS)
                 "vCPUMASK", "TDS", "CALLS", "CALLS/s",
                 "ns", "ns/CALL", "CYCLES", "CY/CALL", "NAME");
 
-    baseline_cycles = baseline_nsecs = 0;
+    cycles_baseline = nsecs_baseline = 0;
     rc = 0;
 
     /* Run each test listed in pmt_tests[].
+     *
+     * TODO: Use a copy of pmt_tests[] so that we don't have to worry
+     * about it changing while we're running the tests.
      */
     for (test = tests; test->name; ++test) {
         unsigned long cycles_avg, nsecs_avg, iters_avg;
@@ -376,30 +388,33 @@ pmt_run_sysctl(SYSCTL_HANDLER_ARGS)
         nsecs_avg = pmt_cycles2nsecs(cycles_avg);
 #endif
 
-        if (nsecs_avg <= baseline_nsecs || iters_avg < 1)
+        if (nsecs_avg <= nsecs_baseline || cycles_avg < cycles_baseline || iters_avg < 1)
             continue;
 
         /* Subtract the pmt framework overhead.
          */
         if (test->every) {
-            cycles_avg -= baseline_cycles;
-            nsecs_avg -= baseline_nsecs;
+            cycles_avg -= cycles_baseline;
+            nsecs_avg -= nsecs_baseline;
         }
 
-        /* (Re)compute the baseline.
+        /* (Re)compute the baseline.  In order to work completely right this
+         * requires that the "null" test is run first, followed by the "func"
+         * test, followed by all other tests.
          *
          * TODO: Unconditionally run the "null" and "func" tests.
          */
         if (!test->every || test->every == pmt_func_every) {
-            baseline_cycles = cycles_avg;
-            baseline_nsecs = nsecs_avg;
+            cycles_baseline = cycles_avg;
+            nsecs_baseline = nsecs_avg;
         }
 
         sbuf_printf(sb, "%016lx %3u %12lu %12lu %12lu %8lu %12lu %8lu  %s\n",
                     pmt_cpuset.__bits[0],                   // vCPUMASK
                     CPU_COUNT(&cpuset),                     // TDS
                     iters_avg,                              // CALLS
-                    (iters_avg * 1000000000ul) / nsecs_avg, // CALLS/s
+                    pmt_x1b_div_y(iters_avg, nsecs_avg),    // CALLS/s
+                    //(iters_avg * 1000000000ul) / nsecs_avg, // CALLS/s
                     nsecs_avg,                              // ns
                     nsecs_avg / iters_avg,                  // ns/CALL
                     cycles_avg,                             // CYCLES
@@ -442,7 +457,6 @@ pmt_run_main(void *arg)
 {
     struct thread *td = curthread;
     pmt_priv_t *priv = arg;
-    unsigned int nrunning;
     pmt_test_cb_t *every;
     unsigned int iters;
     pmt_share_t *shr;
@@ -466,13 +480,12 @@ pmt_run_main(void *arg)
     every = priv->every;
     iters = pmt_iters;
     shr = priv->shr;
-    nrunning = 0;
 
-    /* Wait here for pmt_run() to signal us, which won't happen until
-     * all worker threads have arrived at this point and called cv_wait().
+    /* Wait here for pmt_run() to signal us, which won't happen until all
+     * worker threads have arrived at this point and called cv_wait().
      */
     mtx_lock(&shr->mtx);
-    ++shr->nactive;
+    ++shr->nwaiting;
     cv_wait_unlock(&shr->cv, &shr->mtx);
 
     /* Busy wait to synchronize all threads that have awakened.
@@ -487,7 +500,7 @@ pmt_run_main(void *arg)
 
     /* First thread to increment nrunning records the start time.
      */
-    if (0 == atomic_fetchadd_int(&nrunning, 1)) {
+    if (0 == atomic_fetchadd_int(&shr->nrunning, 1)) {
 #ifdef PMT_TSC
         shr->start = rdtsc();
 #else
@@ -524,7 +537,7 @@ pmt_run_main(void *arg)
     /* Last thread out records the stop time and signals the master
      * thread waiting in pmt_run().
      */
-    if (1 == atomic_fetchadd_int(&shr->nactive, -1)) {
+    if (1 == atomic_fetchadd_int(&shr->nrunning, -1)) {
 #ifdef PMT_TSC
         shr->stop = rdtsc();
 #else
@@ -547,7 +560,7 @@ pmt_run_main(void *arg)
  * across all the vCPUs specified by pmt_cpuset.
  */
 static int
-pmt_run(pmt_test_t *ptest, void *mem, size_t memsz, int nsamples, pmt_sample_t *psamples)
+pmt_run(pmt_test_t *ptest, void *mem, size_t memsz, int samplesc, pmt_sample_t *samplesv)
 {
     uint64_t samples_step = pmt_samples_step;
     int signaled = 0;
@@ -562,7 +575,7 @@ pmt_run(pmt_test_t *ptest, void *mem, size_t memsz, int nsamples, pmt_sample_t *
                "ns", "ns/CALL", "CYCLES", "CY/CALL");
     }
 
-    for (n = 0; n < nsamples; ++n, ++psamples) {
+    for (n = 0; n < samplesc; ++n, ++samplesv) {
         unsigned long cycles = 0;
         unsigned long nsecs = 0;
         unsigned int iters = 0;
@@ -581,8 +594,8 @@ pmt_run(pmt_test_t *ptest, void *mem, size_t memsz, int nsamples, pmt_sample_t *
 
         mtx_init(&shr->mtx, "pmtmtx", (char *)0, MTX_DEF);
         mtx_init(&shr->spin, "pmtspin", (char *)0, MTX_SPIN);
-        sx_init(&shr->sx, "pmtsx");
         rw_init(&shr->rw, "pmtrw");
+        sx_init(&shr->sx, "pmtsx");
         rm_init(&shr->rm, "pmtrm");
         cv_init(&shr->cv, "pmtcv");
 
@@ -612,18 +625,17 @@ pmt_run(pmt_test_t *ptest, void *mem, size_t memsz, int nsamples, pmt_sample_t *
             }
         }
 
-        shr->count = 0;
-
-        /* Wait/poll for all worker threads to get to the rendezvous point.
+        /* Wait/poll for all worker threads to get to the cv_wait rendezvous point
+         * (i.e., all workers threads have been created and are waiting on &shr->cv).
          */
         mtx_lock(&shr->mtx);
-        while (shr->nactive < nworkers) {
+        while (shr->nwaiting < nworkers) {
             msleep(shr, &shr->mtx, 0, "wait", hz / 10);
         }
 
-        /* Give all worker threads ~33ms to wake up and reach the rendezvous
-         * point (in an attempt to arrange that they are all scheduled and
-         * running and hence start the test at approximately the same time).
+        /* Give all worker threads ~33ms to wake up and reach the busy-wait
+         * rendezvous point (in an attempt to arrange that they are all scheduled
+         * and running and hence start the test at approximately the same time).
          */
 #ifdef PMT_TSC
         shr->sync = rdtsc() + tsc_freq / 33;
@@ -636,27 +648,23 @@ pmt_run(pmt_test_t *ptest, void *mem, size_t memsz, int nsamples, pmt_sample_t *
          */
         cv_broadcast(&shr->cv);
 
-        while (shr->nactive > 0) {
-            if (signaled) {
-                cv_wait_sig(&shr->cv, &shr->mtx);
-                continue;
-            }
-
-            signaled = cv_wait_sig(&shr->cv, &shr->mtx);
+        signaled = cv_wait_sig(&shr->cv, &shr->mtx);
+        if (signaled) {
+            cv_wait(&shr->cv, &shr->mtx);
         }
         mtx_unlock(&shr->mtx);
 
 
         /* Test is done, record results then clean up.
          */
-        psamples->delta = shr->stop - shr->start;
-        psamples->iters = iters;
+        samplesv->delta = shr->stop - shr->start;
+        samplesv->iters = iters;
 
 #ifdef PMT_TSC
         cycles = (shr->stop - shr->start);
         nsecs = pmt_cycles2nsecs(cycles);
 #else
-        nsecs = psamples->delta;
+        nsecs = samplesv->delta;
 #endif
 
         if (nsecs == 0) {
